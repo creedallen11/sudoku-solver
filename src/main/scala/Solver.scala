@@ -16,13 +16,13 @@ object Solver extends App {
     def buildStartMap(lst: List[((Int, Int), Int)], m: Map[(Int, Int), List[Int]]): Map[(Int, Int), List[Int]] =
       lst match {
         case Nil => m
-        case head::tail => buildStartMap(lst.tail, filterPeers(m, (peers(head._1._1, head._1._2)), head._2))
+        case head::tail => buildStartMap(lst.tail, filterPeers(m, peers(head._1._1, head._1._2), head._2))
       }
 
     /* Update the row, col and box of all singletons (placed numbers). */
     def filterPeers(m: Map[(Int, Int), List[Int]], keys: List[(Int, Int)], n: Int): Map[(Int, Int), List[Int]] = keys match {
       case Nil => m
-      case head::tail => filterPeers((m updated (head, (m(head) filter (x => x != n)))), tail, n)
+      case head::tail => filterPeers(m updated(head, m(head) filter (x => x != n)), tail, n)
     }
 
     // Generate key->value for initial unfiltered map representing a board.
@@ -36,8 +36,10 @@ object Solver extends App {
     val unfilteredMap = (keys zip values) toMap
 
     // Generate list of coordinates that need their peers updated.
-    val toUpdate = ((for (i <- 0 to 8; j <- 0 to 8 if (unfilteredMap((i,j)).length == 1))
-      yield { ((i,j), unfilteredMap(i,j).head)}) toList)
+    val toUpdate = (for (i <- 0 to 8; j <- 0 to 8 if unfilteredMap((i, j)).length == 1)
+      yield {
+        ((i, j), unfilteredMap(i, j).head)
+      }) toList
 
     new Board(buildStartMap(toUpdate, unfilteredMap))
   }
@@ -56,7 +58,7 @@ object Solver extends App {
 
     val unfilteredPeers = ((for (i <- 0 to 8) yield (row, i)) ++ (for (j <- 0 to 8) yield (j, col))++ box).toList
 
-    (unfilteredPeers filter (x => x != (row, col))).toSet.toList
+    (unfilteredPeers filter (x => x !=(row, col))).distinct
   }
 
   // Top-left corner is (0, 0). Bottom-right corner is (8,8).
@@ -76,36 +78,77 @@ object Solver extends App {
       }
     }
 
-    def isSolved(): Boolean = {
-      for (i <- 0 to 8; j <- 0 to 8 if (valueAt(i,j) == None)) return false
-      return true
+    def isSolved: Boolean = {
+      for (i <- 0 to 8; j <- 0 to 8 if valueAt(i, j).isEmpty) return false
+      true
     }
 
-    def isUnsolvable(): Boolean = {
+    def isUnsolvable: Boolean = {
       for (i <- 0 to 8; j <- 0 to 8)
-        if (availableValuesAt(i,j).length == 0) return true
+        if (availableValuesAt(i, j).isEmpty) return true
       false
     }
 
+    /* Places a value at (row, col) and updates the board accordingly. */
     def place(row: Int, col: Int, value: Int): Board = {
       require(availableValuesAt(row, col).contains(value))
-      throw new UnsupportedOperationException("not implemented")
+      val pMap = available updated((row, col), List(value))
+      val peersLst = peers(row, col) filter (x => pMap(x).contains(value))
+
+      /* take the map, take the list of peers that need update, the value) */
+      def updateMap(m: Map[(Int, Int), List[Int]], pList: List[(Int, Int)], n: Int): Map[(Int, Int), List[Int]] =
+        pList match {
+          case Nil => m
+          case head::tail =>
+            val updatedMap = m updated (pList.head, m(pList.head._1, pList.head._2) filter (x => x != n))
+            // if an updated mapping became a singleton, update its peers too
+            if (updatedMap(pList.head._1, pList.head._2).length == 1)
+              updateMap(
+                updateMap(updatedMap, peers(pList.head._1, pList.head._2) filter (x => updatedMap(x._1, x._2) contains updatedMap(pList.head._1, pList.head._2).head),
+                  updatedMap(pList.head._1, pList.head._2).head), tail, n)
+            else updateMap(updatedMap, tail, n)
+        }
+      new Board(updateMap(pMap, peersLst, value))
     }
 
-    // You can return any Iterable (e.g., Stream)
+    /* Returns a list of boards in the next branching considering all possible ways to place the first value. */
     def nextStates(): List[Board] = {
-      if (isUnsolvable()) {
-        return List()
+      if (isUnsolvable) {
+        List()
       }
+      else {
+        def valueCount(board: Board): Int = {
+          val count = (for (i <- 0 to 8; j <- 0 to 8 if board.available(i, j).length > 1) yield board.available(i, j).length - 1) toList
 
-      throw new UnsupportedOperationException("not implemented")
+          count.sum
+        }
+
+        val nextMovesCount = (for (i <- 0 to 8; j <- 0 to 8 if available(i, j).length > 1) yield {
+          for (value <- available(i,j)) yield {
+            (place(i,j, value), valueCount(place(i,j, value)))
+          }
+        } ) toList
+
+        val tups = nextMovesCount.flatten.sortWith((x,y) => y._2 > x._2 )
+        for (v <- tups) yield v._1
+      }
     }
 
     def solve(): Option[Board] = {
-      throw new UnsupportedOperationException("not implemented")
+      if (this.isSolved) {
+        return Some(this)
+      }
+      else for (boards <- this.nextStates()) {
+        boards.solve() match {
+          case Some(x) => return Some(x)
+          case None =>
+        }
+        None
+      }
+      None
     }
 
-    override def toString(): String = {
+    override def toString: String = {
       var str: String = ""
       for(i <- 0 to 8){
         if(i == 0 || i == 3 || i == 6) str = str + "-------------\n"
@@ -113,14 +156,14 @@ object Solver extends App {
           if(j == 0 || j == 3 || j == 6) str = str + "|"
           // hack so toString can be used in testing, should call class method
           val ls:List[Int] = available.getOrElse((i, j), (1 to 9).toList)
-          if(ls.size == 1) str = str + ls(0)
+          if(ls.size == 1) str = str + ls.head
           else str = str + "."
           if(j == 8) str = str + "|"
         }
         str = str + "\n"
         if(i == 8) str = str + "-------------\n"
       }
-      return str
+      str
     }
   }
 }
