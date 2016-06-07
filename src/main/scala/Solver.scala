@@ -134,6 +134,7 @@ object Solver extends App {
       }
     }
 
+    /* Find and return Option[solved board] */
     def solve(): Option[Board] = {
       if (this.isSolved) {
         return Some(this)
